@@ -1,9 +1,10 @@
 from flask import Flask, render_template, request, jsonify
+from flask_cors import CORS
 import re
 from sklearn.ensemble import RandomForestClassifier
 
-# --- CRITICAL: Gunicorn needs this variable named 'app' ---
 app = Flask(__name__)
+CORS(app)  # Enables Chrome Extension to make API requests to this server
 
 # --- 1. FEATURE EXTRACTION FUNCTION ---
 def extract_features(url):
@@ -14,85 +15,66 @@ def extract_features(url):
     dot_count = url.count(".")
     hyphen_count = url.count("-")
     
-    suspicious_words = ["login", "verify", "update", "account", "banking", "secure", "signin", "admin"]
+    suspicious_words = ["login", "verify", "update", "account", "banking", "secure", "signin"]
     has_suspicious_word = 1 if any(word in url.lower() for word in suspicious_words) else 0
 
     return [url_len, has_https, has_ip, has_at, dot_count, hyphen_count, has_suspicious_word]
 
 # --- 2. TRAIN ML MODEL ON STARTUP ---
 X_train = [
-    [18, 1, 0, 0, 2, 0, 0],  # Safe
+    [18, 1, 0, 0, 2, 0, 0],
     [22, 1, 0, 0, 2, 0, 0],
     [25, 1, 0, 0, 2, 0, 0],
-    [20, 1, 0, 0, 1, 0, 0],
-    [28, 1, 0, 0, 2, 0, 0],
-    [32, 1, 0, 0, 2, 0, 0],
-    [85, 0, 1, 1, 4, 3, 1],  # Phishing
+    [85, 0, 1, 1, 4, 3, 1],
     [92, 0, 0, 1, 5, 4, 1],
     [70, 0, 0, 0, 4, 3, 1],
-    [105, 0, 1, 0, 6, 5, 1],
-    [23, 0, 1, 0, 3, 0, 1],
-    [23, 0, 1, 0, 3, 0, 1],
-    [25, 0, 1, 0, 3, 0, 0],
-    [30, 0, 1, 0, 4, 1, 1]
+    [20, 1, 0, 0, 1, 0, 0],
+    [105, 0, 1, 0, 6, 5, 1]
 ]
-y_train = [0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1]
+y_train = [0, 0, 0, 1, 1, 1, 0, 1]
 
-model = RandomForestClassifier(n_estimators=50, random_state=1)
+model = RandomForestClassifier(n_estimators=10, random_state=42)
 model.fit(X_train, y_train)
 
-def get_prediction(url):
-    extracted = extract_features(url)
-    features = [extracted]
-    
-    if extracted[2] == 1 and extracted[1] == 0:
-        prediction = 1
-        confidence = 95.0
-    else:
-        prediction = int(model.predict(features)[0])
-        confidence = round(float(max(model.predict_proba(features)[0])) * 100, 1)
-
-    return prediction, confidence
-
-# --- 3. FLASK WEB ROUTE ---
+# --- 3. WEB PAGE ROUTE ---
 @app.route('/', methods=['GET', 'POST'])
 def home():
     result = None
     if request.method == 'POST':
-        url = request.form.get('url_input', '').strip()
-        prediction, confidence = get_prediction(url)
+        url = request.form.get('url_input', '')
+        features = [extract_features(url)]
+        prediction = model.predict(features)[0]
+        confidence = max(model.predict_proba(features)[0]) * 100
 
-        if prediction == 1:
-            verdict = f"HIGH RISK: Phishing Detected ({confidence}% ML Confidence)"
-            status_class = "danger"
-        else:
-            verdict = f"SAFE: Low Risk Detected ({confidence}% ML Confidence)"
-            status_class = "safe"
+        verdict = f"HIGH RISK: Phishing ({confidence:.1f}%)" if prediction == 1 else f"SAFE ({confidence:.1f}%)"
+        status_class = "danger" if prediction == 1 else "safe"
 
         result = {
             'url': url,
             'verdict': verdict,
             'status_class': status_class,
-            'reasons': ["Extracted features and ran ML classification."]
+            'reasons': [f"Evaluated using ML Random Forest classifier."]
         }
     return render_template('index.html', result=result)
 
-# --- 4. REST API ENDPOINT ---
+# --- 4. API ROUTE FOR BROWSER EXTENSION ---
 @app.route('/api/scan', methods=['POST'])
 def api_scan():
-    data = request.get_json(silent=True) or {}
-    url = data.get('url', '').strip()
-    
+    data = request.get_json()
+    url = data.get('url', '') if data else ''
+
     if not url:
         return jsonify({'error': 'No URL provided'}), 400
 
-    prediction, confidence = get_prediction(url)
-    
+    features = [extract_features(url)]
+    prediction = model.predict(features)[0]
+    confidence = max(model.predict_proba(features)[0]) * 100
+
     return jsonify({
         'url': url,
         'is_phishing': bool(prediction == 1),
-        'risk_level': 'HIGH' if prediction == 1 else 'LOW',
-        'confidence_score': confidence
+        'confidence': round(confidence, 1),
+        'verdict': 'Phishing Detected' if prediction == 1 else 'Safe'
     })
 
 if __name__ == '__main__':
