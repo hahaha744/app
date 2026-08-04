@@ -1,62 +1,67 @@
 from flask import Flask, render_template, request
 import re
+from sklearn.ensemble import RandomForestClassifier
 
 app = Flask(__name__)
 
-def analyze_url(url):
-    reasons = []
-    score = 0  # Higher score = higher suspicion
+# --- 1. FEATURE EXTRACTION FUNCTION ---
+def extract_features(url):
+    """Extract numerical features from a URL string for the ML model."""
+    url_len = len(url)
+    has_https = 1 if url.startswith("https://") else 0
+    has_ip = 1 if re.search(r'https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', url) else 0
+    has_at = 1 if "@" in url else 0
+    dot_count = url.count(".")
+    hyphen_count = url.count("-")
+    
+    suspicious_words = ["login", "verify", "update", "account", "banking", "secure", "signin"]
+    has_suspicious_word = 1 if any(word in url.lower() for word in suspicious_words) else 0
 
-    # 1. Check for missing HTTPS
-    if not url.startswith("https://"):
-        score += 2
-        reasons.append("Does not use secure HTTPS encryption.")
+    return [url_len, has_https, has_ip, has_at, dot_count, hyphen_count, has_suspicious_word]
 
-    # 2. Check if IP address is used instead of a domain name
-    if re.search(r'https?://\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}', url):
-        score += 3
-        reasons.append("Uses an IP address instead of a recognized domain name.")
+# --- 2. TRAIN ML MODEL ON STARTUP ---
+# Synthetic training data: [length, has_https, has_ip, has_at, dot_count, hyphen_count, has_suspicious_word]
+# Labels: 0 = Safe, 1 = Phishing
+X_train = [
+    [18, 1, 0, 0, 2, 0, 0], # https://google.com
+    [22, 1, 0, 0, 2, 0, 0], # https://github.com
+    [25, 1, 0, 0, 2, 0, 0], # https://wikipedia.org
+    [85, 0, 1, 1, 4, 3, 1], # http://192.168.1.1/login-update-banking@verify
+    [92, 0, 0, 1, 5, 4, 1], # http://secure-update-account-login.com/signin/verify
+    [70, 0, 0, 0, 4, 3, 1], # http://banking-security-check.com/update
+    [20, 1, 0, 0, 1, 0, 0], # https://amazon.com
+    [105, 0, 1, 0, 6, 5, 1] # http://10.0.0.1/verify-account-security-login
+]
+y_train = [0, 0, 0, 1, 1, 1, 0, 1]
 
-    # 3. Check for suspicious symbols like '@' (used to disguise actual destinations)
-    if "@" in url:
-        score += 3
-        reasons.append("Contains an '@' symbol, which can hide the real destination domain.")
+# Initialize and train the Random Forest Classifier
+model = RandomForestClassifier(n_estimators=10, random_state=42)
+model.fit(X_train, y_train)
 
-    # 4. Check for URL length (phishing links are often unnaturally long)
-    if len(url) > 75:
-        score += 2
-        reasons.append("URL is unusually long (over 75 characters).")
-
-    # 5. Check for common phishing keywords in the URL
-    suspicious_keywords = ["login", "verify", "update", "account", "banking", "secure", "signin"]
-    if any(keyword in url.lower() for keyword in suspicious_keywords):
-        score += 1
-        reasons.append("Contains urgent security keywords commonly seen in phishing attacks.")
-
-    # Determine verdict based on overall risk score
-    if score >= 4:
-        verdict = "HIGH RISK: Likely Phishing"
-        status_class = "danger"
-    elif score >= 2:
-        verdict = "MODERATE RISK: Proceed with Caution"
-        status_class = "warning"
-    else:
-        verdict = "SAFE: Low Phishing Risk Detected"
-        status_class = "safe"
-
-    return verdict, status_class, reasons
-
+# --- 3. FLASK ROUTES ---
 @app.route('/', methods=['GET', 'POST'])
 def home():
     result = None
     if request.method == 'POST':
         url = request.form.get('url_input', '')
-        verdict, status_class, reasons = analyze_url(url)
+        
+        # Extract features and predict using the trained ML model
+        features = [extract_features(url)]
+        prediction = model.predict(features)[0]
+        confidence = max(model.predict_proba(features)[0]) * 100
+
+        if prediction == 1:
+            verdict = f"HIGH RISK: Phishing Detected ({confidence:.1f}% ML Confidence)"
+            status_class = "danger"
+        else:
+            verdict = f"SAFE: Low Risk Detected ({confidence:.1f}% ML Confidence)"
+            status_class = "safe"
+
         result = {
             'url': url,
             'verdict': verdict,
             'status_class': status_class,
-            'reasons': reasons
+            'reasons': [f"Extracted {len(features[0])} numerical URL features for evaluation."]
         }
     return render_template('index.html', result=result)
 
