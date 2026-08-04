@@ -2,20 +2,45 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>My Flask App</title>
+    <title>Phishing Detection Scanner</title>
     <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f9;
-            text-align: center;
-            padding-top: 50px;
-        }
-        h1 { color: #333; }
-        p { color: #666; }
+        body { font-family: Arial, sans-serif; background: #0f172a; color: #f8fafc; text-align: center; padding-top: 50px; }
+        .card { background: #1e293b; padding: 30px; border-radius: 12px; display: inline-block; width: 80%; max-width: 500px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); }
+        input[type="text"] { width: 90%; padding: 12px; margin-bottom: 15px; border-radius: 6px; border: 1px solid #475569; font-size: 16px; background: #0f172a; color: white; }
+        button { width: 95%; padding: 12px; background: #3b82f6; color: white; border: none; border-radius: 6px; font-size: 16px; cursor: pointer; font-weight: bold; }
+        .results { margin-top: 25px; text-align: left; padding: 15px; border-radius: 8px; }
+        .danger { background: #7f1d1d; border: 1px solid #ef4444; }
+        .warning { background: #78350f; border: 1px solid #f59e0b; }
+        .safe { background: #064e3b; border: 1px solid #10b981; }
+        ul { padding-left: 20px; }
     </style>
 </head>
 <body>
-    <h1>Welcome to My Website!</h1>
-    <p>This page is hosted live on Render using Python and Flask.</p>
+    <div class="card">
+        <h1>🛡️ Phishing Link Detector</h1>
+        <p>Paste a URL below to check for suspicious indicators:</p>
+        
+        <form method="POST">
+            <input type="text" name="url_input" placeholder="https://example.com" required>
+            <button type="submit">Scan URL</button>
+        </form>
+
+        {% if result %}
+        <div class="results {{ result.status_class }}">
+            <h3>Verdict: {{ result.verdict }}</h3>
+            <p><strong>Scanned URL:</strong> {{ result.url }}</p>
+            {% if result.reasons %}
+                <p><strong>Risk Factors:</strong></p>
+                <ul>
+                    {% for reason in result.reasons %}
+                        <li>{{ reason }}</li>
+                    {% endfor %}
+                </ul>
+            {% else %}
+                <p>No major risk heuristics triggered.</p>
+            {% endif %}
+        </div>
+        {% endif %}
+    </div>
 </body>
 </html>
